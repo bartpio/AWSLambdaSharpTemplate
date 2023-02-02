@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
 using Amazon.Lambda.TestUtilities;
 using Kralizek.Lambda;
+using Kralizek.Lambda.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -142,6 +145,51 @@ public class SqsEventHandlerTests
         await sut.HandleAsync(sqsEvent, lambdaContext);
 
         mockMessageHandler.Verify(p => p.HandleAsync(It.IsAny<TestMessage>(), lambdaContext), Times.Exactly(sqsEvent.Records.Count));
+    }
+
+    [Theory]
+    public async Task HandleAsync_records_exceptions_when_applicable(bool applicable)
+    {
+        mockMessageHandler = new Mock<IMessageHandler<TestMessage>>();
+        mockMessageHandler.Setup(p => p.HandleAsync(It.IsAny<TestMessage>(), It.IsAny<ILambdaContext>()))
+            .Returns(applicable ? Task.FromException(new InvalidDataException()) : Task.CompletedTask);
+
+        mockServiceProvider.Setup(p => p.GetService(typeof(IMessageHandler<TestMessage>)))
+           .Returns(mockMessageHandler.Object);
+
+        var batchResponseProvider = new SqsBatchResponseProvider();
+        // SqsBatchResponseFunction (via its base EventResponseFunction) would normally do this
+        ((IEventResponseProvider<SQSBatchResponse>)batchResponseProvider).Activate();
+
+        mockServiceProvider.Setup(p => p.GetService(typeof(SqsBatchResponseProvider)))
+            .Returns(batchResponseProvider);
+
+        var sqsEvent = new SQSEvent
+        {
+            Records = new List<SQSEvent.SQSMessage>
+            {
+                new SQSEvent.SQSMessage
+                {
+                    Body = "{}",
+                    MessageId = "msg1"
+                },
+                new SQSEvent.SQSMessage
+                {
+                    Body = "{}",
+                    MessageId = "msg2"
+                },
+            }
+        };
+
+        var lambdaContext = new TestLambdaContext();
+
+        var sut = CreateSystemUnderTest();
+
+        await sut.HandleAsync(sqsEvent, lambdaContext);
+
+        mockMessageHandler.Verify(p => p.HandleAsync(It.IsAny<TestMessage>(), lambdaContext), Times.Exactly(sqsEvent.Records.Count));
+        var expectation = applicable ? new string[] { "msg1", "msg2" } : Array.Empty<string>();
+        Assert.That(((IEventResponseProvider<SQSBatchResponse>)batchResponseProvider).GetResponse().BatchItemFailures.Select(x => x.ItemIdentifier), Is.EquivalentTo(expectation));
     }
 
     [Test]

@@ -1,12 +1,11 @@
-﻿using System;
-using System.Linq;
-using System.Text.Json;
-using System.Threading.Tasks;
-using Amazon.Lambda.Core;
+﻿using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
+using Kralizek.Lambda.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System;
+using System.Threading.Tasks;
 
 namespace Kralizek.Lambda;
 
@@ -48,6 +47,9 @@ public class ParallelSqsEventHandler<TMessage>: IEventHandler<SQSEvent> where TM
     {
         if (input is { Records.Count: > 0 })
         {
+            var batchResponseProvider = _serviceProvider.GetService<SqsBatchResponseProvider>();
+            batchResponseProvider?.AssertActivated();
+
             await input.Records.ForEachAsync(_options.MaxDegreeOfParallelism, async singleSqsMessage =>
             {
                 using var scope = _serviceProvider.CreateScope();
@@ -68,7 +70,15 @@ public class ParallelSqsEventHandler<TMessage>: IEventHandler<SQSEvent> where TM
                     throw new InvalidOperationException($"No IMessageHandler<{typeof(TMessage).Name}> could be found.");
                 }
 
-                await messageHandler.HandleAsync(message, context);
+                try
+                {
+                    await messageHandler.HandleAsync(message, context).ConfigureAwait(false);
+                }
+                catch (Exception exc) when (batchResponseProvider is not null)
+                {
+                    _logger.LogError(exc, "Recording batch item failure for message {MessageId}", singleSqsMessage.MessageId);
+                    batchResponseProvider.RecordFailure(singleSqsMessage.MessageId);
+                }
             });
         }
     }

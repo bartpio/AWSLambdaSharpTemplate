@@ -1,9 +1,10 @@
-﻿using System;
-using System.Threading.Tasks;
-using Amazon.Lambda.Core;
+﻿using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
+using Kralizek.Lambda.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Threading.Tasks;
 
 namespace Kralizek.Lambda;
 
@@ -32,6 +33,9 @@ public class SqsEventHandler<TMessage> : IEventHandler<SQSEvent> where TMessage 
     {
         if (input is { Records: { } })
         {
+            var batchResponseProvider = _serviceProvider.GetService<SqsBatchResponseProvider>();
+            batchResponseProvider?.AssertActivated();
+
             foreach (var record in input.Records)
             {
                 using var scope = _serviceProvider.CreateScope();
@@ -52,7 +56,15 @@ public class SqsEventHandler<TMessage> : IEventHandler<SQSEvent> where TMessage 
                 }
 
                 _logger.LogInformation("Invoking notification handler");
-                await handler.HandleAsync(message, context).ConfigureAwait(false);
+                try
+                {
+                    await handler.HandleAsync(message, context).ConfigureAwait(false);
+                }
+                catch (Exception exc) when (batchResponseProvider is not null)
+                {
+                    _logger.LogError(exc, "Recording batch item failure for message {MessageId}", record.MessageId);
+                    batchResponseProvider.RecordFailure(record.MessageId);
+                }
             }
         }
     }

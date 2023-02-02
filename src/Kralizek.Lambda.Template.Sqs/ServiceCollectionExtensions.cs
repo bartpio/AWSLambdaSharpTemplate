@@ -1,5 +1,6 @@
 using System;
 using Amazon.Lambda.SQSEvents;
+using Kralizek.Lambda.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -39,7 +40,28 @@ public static class ServiceCollectionExtensions
 
         return configurator;
     }
-        
+
+    /// <summary>
+    /// Registers Partial Batch Response functionality, so that handler exceptions are caught and reported to Lambda as per-message failures.
+    /// Use with <see cref="SqsBatchResponseFunction" />.
+    /// </summary>
+    /// <typeparam name="TMessage">The internal type of the SQS messages.</typeparam>
+    /// <param name="configurator">A configurator used to facilitate the enablement of Partial Batch Response functionality.</param>
+    /// <returns>The <paramref name="configurator"/> once it has been configured.</returns>
+    /// <seealso href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-lambda-eventsourcemapping.html#cfn-lambda-eventsourcemapping-functionresponsetypes" />
+    /// <seealso href="https://aws.amazon.com/about-aws/whats-new/2021/11/aws-lambda-partial-batch-response-sqs-event-source/" />
+    /// <seealso href="https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html" />
+    public static IMessageHandlerConfigurator<TMessage> WithReportBatchItemFailures<TMessage>(this IMessageHandlerConfigurator<TMessage> configurator)
+        where TMessage : class
+    {
+        ArgumentNullException.ThrowIfNull(configurator);
+
+        configurator.Services.AddScoped<SqsBatchResponseProvider>();
+        configurator.Services.AddScoped<IEventResponseProvider<SQSBatchResponse>>(isp => isp.GetRequiredService<SqsBatchResponseProvider>());
+
+        return configurator;
+    }
+
     /// <summary>
     /// Registers a custom serializer for messages.
     /// </summary>
