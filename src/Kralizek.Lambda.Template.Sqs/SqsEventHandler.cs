@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
+using Kralizek.Lambda.Accessors;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -35,6 +36,7 @@ public class SqsEventHandler<TMessage> : IEventHandler<SQSEvent> where TMessage 
             foreach (var record in input.Records)
             {
                 using var scope = _serviceProvider.CreateScope();
+                record.ExposeViaAccessor(scope);
 
                 var sqsMessage = record.Body;
 
