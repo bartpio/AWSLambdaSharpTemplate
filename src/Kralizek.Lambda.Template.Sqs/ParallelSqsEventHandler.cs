@@ -1,9 +1,8 @@
 ﻿using System;
-using System.Linq;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Amazon.Lambda.Core;
 using Amazon.Lambda.SQSEvents;
+using Kralizek.Lambda.Accessors;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -51,6 +50,7 @@ public class ParallelSqsEventHandler<TMessage>: IEventHandler<SQSEvent> where TM
             await input.Records.ForEachAsync(_options.MaxDegreeOfParallelism, async singleSqsMessage =>
             {
                 using var scope = _serviceProvider.CreateScope();
+                singleSqsMessage.ExposeViaAccessor(scope);
 
                 var sqsMessage = singleSqsMessage.Body;
                 _logger.LogDebug("Message received: {Message}", sqsMessage);
